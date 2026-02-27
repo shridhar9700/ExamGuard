@@ -1,0 +1,153 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  TEACHER
+  STUDENT
+}
+
+enum ExamType {
+  PRACTICAL
+  MCQ
+  HYBRID
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  TERMINATED_FOR_VIOLATION
+  TIMED_OUT
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdTests Assessment[]  @relation("TeacherAssessments")
+  attempts     TestAttempt[] @relation("StudentAttempts")
+
+  @@map("users")
+}
+
+model Assessment {
+  id                    String        @id @default(cuid())
+  title                 String
+  description           String?       @default("")
+  accessCode            String        @unique
+  teacherId             String
+  teacher               User          @relation("TeacherAssessments", fields: [teacherId], references: [id], onDelete: Cascade)
+  
+  // Exam Format & Laboratory Configuration
+  examType              ExamType      @default(PRACTICAL)
+  subjectCode           String?       @default("CS301")
+  labName               String?       @default("Systems & Web Technologies Lab")
+  batchName             String?       @default("Batch A1")
+  
+  // Whitelisted In-App Resources (Permitted technical documentation/references)
+  // e.g. [{ title: "MDN Web Docs", url: "https://developer.mozilla.org", description: "Official HTML/CSS/JS Reference" }]
+  allowedResources      Json          @default("[]")
+
+  // Timing configuration
+  durationMinutes       Int           @default(60)
+  perQuestionTimer      Boolean       @default(false)
+  secondsPerQuestion    Int           @default(60)
+  
+  // Scoring & Results configuration
+  totalMarks            Int           @default(50)
+  passingPercentage     Int           @default(40)
+  showResultImmediately Boolean       @default(false) // For practicals, teacher reviews submissions first
+  
+  // Security & Proctoring configuration
+  maxViolationsAllowed  Int           @default(3)
+  requireCamera         Boolean       @default(true)
+  requireMicrophone     Boolean       @default(true)
+  requireFullscreen     Boolean       @default(true)
+  shuffleQuestions      Boolean       @default(false)
+  
+  isPublished           Boolean       @default(true)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  questions             Question[]
+  attempts              TestAttempt[]
+
+  @@map("assessments")
+}
+
+model Question {
+  id              String      @id @default(cuid())
+  assessmentId    String
+  assessment      Assessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  orderIndex      Int         @default(0)
+  questionText    String
+  marks           Int         @default(10)
+  negativeMarks   Float       @default(0.0)
+  
+  // Question Format: "PRACTICAL_WEB" | "PRACTICAL_CODE" | "PRACTICAL_SQL" | "MCQ"
+  questionType    String      @default("PRACTICAL_WEB")
+  
+  // Practical Configuration:
+  // Starter boilerplate files: [{ filename: "index.html", content: "...", language: "html" }]
+  starterFiles    Json        @default("[]")
+  // Execution test cases: [{ input: "...", expectedOutput: "...", isHidden: false }]
+  testCases       Json        @default("[]")
+  // Evaluation Rubric: [{ criteria: "HTML5 Semantic Structure", marks: 5 }]
+  rubric          Json        @default("[]")
+
+  // Options stored as JSON array for MCQ questions: [{ id: "A", text: "..." }, { id: "B", text: "..." }]
+  options         Json        @default("[]")
+  correctOptionId String?     @default("A")
+  explanation     String?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@map("questions")
+}
+
+model TestAttempt {
+  id                 String        @id @default(cuid())
+  assessmentId       String
+  assessment         Assessment    @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  studentId          String
+  student            User          @relation("StudentAttempts", fields: [studentId], references: [id], onDelete: Cascade)
+  
+  // Practical Lab Telemetry:
+  labStation         String?       @default("PC-01") // Assigned terminal / computer ID in the lab
+  submittedFiles     Json          @default("[]")    // Final practical project files [{ filename: "...", content: "..." }]
+  codeSnapshots      Json          @default("[]")    // Time-lapse chronological progression snapshots for code authoring verification
+  keystrokeMetrics   Json          @default("{}")    // Forensic typing telemetry { totalKeys: 420, pasteEvents: 2, avgWpm: 45 }
+  teacherFeedback    String?       @default("")
+  isVerifiedByTeacher Boolean      @default(false)
+  
+  status             AttemptStatus @default(IN_PROGRESS)
+  startedAt          DateTime      @default(now())
+  submittedAt        DateTime?
+  
+  score              Float         @default(0)
+  totalMarks         Float         @default(0)
+  percentage         Float         @default(0)
+  passed             Boolean       @default(false)
+  
+  violationCount     Int           @default(0)
+  violationLogs      Json          @default("[]")
+  answers            Json          @default("{}")
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([assessmentId, studentId])
+  @@map("test_attempts")
+}
